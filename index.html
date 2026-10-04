@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>Findly</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <style>
     html, body, #map { margin: 0; height: 100%; width: 100%; background: #fff; }
-    #log {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
-      background: #fff; color: #000; font: 14px sans-serif;
-      padding: 12px; white-space: pre-wrap;
+    #err {
+      display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+      background: #fff; color: #c00; font: 14px sans-serif; padding: 12px;
     }
     .me {
       width: 22px; height: 22px; border-radius: 50%;
@@ -19,48 +19,35 @@
   </style>
 </head>
 <body>
-  <div id="log">✅ Страница открылась</div>
+  <div id="err"></div>
   <div id="map"></div>
+
   <script>
-    const logEl = document.getElementById("log");
-    const log = (t) => { logEl.textContent += "\n" + t; };
-    window.onerror = (msg) => log("Ошибка: " + msg);
+    function showError(t) {
+      const e = document.getElementById("err");
+      e.style.display = "block";
+      e.textContent = t;
+    }
+    window.onerror = (msg) => showError("Ошибка: " + msg);
 
-    function load(url, isCss) {
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("таймаут 10 сек")), 10000);
-        const el = document.createElement(isCss ? "link" : "script");
-        if (isCss) { el.rel = "stylesheet"; el.href = url; } else { el.src = url; }
-        el.onload = () => { clearTimeout(timer); resolve(); };
-        el.onerror = () => { clearTimeout(timer); reject(new Error("не загрузилось")); };
-        document.head.appendChild(el);
-      });
+    function loadScript(src, onload) {
+      const s = document.createElement("script");
+      s.src = src;
+      s.onload = onload;
+      s.onerror = () => showError("Не загрузился файл: " + src);
+      document.head.appendChild(s);
     }
 
-    async function step(name, fn) {
-      try { await fn(); log("✅ " + name); return true; }
-      catch (e) { log("❌ " + name + ": " + e.message); return false; }
-    }
-
-    async function main() {
-      await step("Telegram", async () => {
-        await load("https://telegram.org/js/telegram-web-app.js");
+    // Telegram: подключаем из своего репозитория, страницу не блокируем
+    loadScript("./telegram-web-app.js", () => {
+      try {
         window.Telegram.WebApp.ready();
         window.Telegram.WebApp.expand();
-      });
-      await step("Стили карты (unpkg)", () =>
-        load("https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css", true));
-      const okJs = await step("Библиотека карты (unpkg)", () =>
-        load("https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"));
-      await step("Данные карты (openfreemap)", async () => {
-        const ctrl = new AbortController();
-        setTimeout(() => ctrl.abort(), 10000);
-        const r = await fetch("https://tiles.openfreemap.org/styles/liberty", { signal: ctrl.signal });
-        if (!r.ok) throw new Error("код " + r.status);
-      });
+      } catch (e) {}
+    });
 
-      if (!okJs) return;
-
+    // Карта
+    loadScript("https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js", () => {
       const map = new maplibregl.Map({
         container: "map",
         style: "https://tiles.openfreemap.org/styles/liberty",
@@ -69,11 +56,7 @@
         pitch: 60,
         bearing: -20
       });
-      map.on("error", (e) => log("Карта: " + (e.error && e.error.message)));
-      map.on("load", () => {
-        log("✅ Карта нарисована");
-        setTimeout(() => { logEl.style.display = "none"; }, 3000);
-      });
+      map.on("error", (e) => showError("Карта: " + (e.error && e.error.message)));
 
       const el = document.createElement("div");
       el.className = "me";
@@ -91,8 +74,7 @@
           { enableHighAccuracy: true }
         );
       }
-    }
-    main();
+    });
   </script>
 </body>
 </html>
