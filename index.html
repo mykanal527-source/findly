@@ -4,9 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>Findly</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <style>
     html, body, #map { margin: 0; height: 100%; width: 100%; background: #fff; }
     #log {
@@ -22,62 +19,80 @@
   </style>
 </head>
 <body>
-  <div id="log">Страница загружена. Запускаю карту...</div>
+  <div id="log">✅ Страница открылась</div>
   <div id="map"></div>
   <script>
     const logEl = document.getElementById("log");
-    function log(t) { logEl.textContent += "\n" + t; }
+    const log = (t) => { logEl.textContent += "\n" + t; };
     window.onerror = (msg) => log("Ошибка: " + msg);
 
-    try {
-      if (window.Telegram && window.Telegram.WebApp) {
+    function load(url, isCss) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("таймаут 10 сек")), 10000);
+        const el = document.createElement(isCss ? "link" : "script");
+        if (isCss) { el.rel = "stylesheet"; el.href = url; } else { el.src = url; }
+        el.onload = () => { clearTimeout(timer); resolve(); };
+        el.onerror = () => { clearTimeout(timer); reject(new Error("не загрузилось")); };
+        document.head.appendChild(el);
+      });
+    }
+
+    async function step(name, fn) {
+      try { await fn(); log("✅ " + name); return true; }
+      catch (e) { log("❌ " + name + ": " + e.message); return false; }
+    }
+
+    async function main() {
+      await step("Telegram", async () => {
+        await load("https://telegram.org/js/telegram-web-app.js");
         window.Telegram.WebApp.ready();
         window.Telegram.WebApp.expand();
-      } else {
-        log("Telegram-скрипт не загрузился");
+      });
+      await step("Стили карты (unpkg)", () =>
+        load("https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css", true));
+      const okJs = await step("Библиотека карты (unpkg)", () =>
+        load("https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"));
+      await step("Данные карты (openfreemap)", async () => {
+        const ctrl = new AbortController();
+        setTimeout(() => ctrl.abort(), 10000);
+        const r = await fetch("https://tiles.openfreemap.org/styles/liberty", { signal: ctrl.signal });
+        if (!r.ok) throw new Error("код " + r.status);
+      });
+
+      if (!okJs) return;
+
+      const map = new maplibregl.Map({
+        container: "map",
+        style: "https://tiles.openfreemap.org/styles/liberty",
+        center: [37.6173, 55.7558],
+        zoom: 15.5,
+        pitch: 60,
+        bearing: -20
+      });
+      map.on("error", (e) => log("Карта: " + (e.error && e.error.message)));
+      map.on("load", () => {
+        log("✅ Карта нарисована");
+        setTimeout(() => { logEl.style.display = "none"; }, 3000);
+      });
+
+      const el = document.createElement("div");
+      el.className = "me";
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([37.6173, 55.7558]).addTo(map);
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const c = [pos.coords.longitude, pos.coords.latitude];
+            marker.setLngLat(c);
+            map.flyTo({ center: c, zoom: 16.5, pitch: 65, duration: 2500 });
+          },
+          () => {},
+          { enableHighAccuracy: true }
+        );
       }
-
-      if (typeof maplibregl === "undefined") {
-        log("Библиотека карты не загрузилась (скорее всего, блокировка сети)");
-      } else {
-        if (!maplibregl.supported()) log("На этом устройстве не работает WebGL");
-
-        const map = new maplibregl.Map({
-          container: "map",
-          style: "https://tiles.openfreemap.org/styles/liberty",
-          center: [37.6173, 55.7558],
-          zoom: 15.5,
-          pitch: 60,
-          bearing: -20
-        });
-
-        map.on("error", (e) => log("Карта: " + (e.error && e.error.message)));
-        map.on("load", () => {
-          log("Карта загружена");
-          setTimeout(() => { logEl.style.display = "none"; }, 2000);
-        });
-
-        const el = document.createElement("div");
-        el.className = "me";
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([37.6173, 55.7558])
-          .addTo(map);
-
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => {
-              const c = [pos.coords.longitude, pos.coords.latitude];
-              marker.setLngLat(c);
-              map.flyTo({ center: c, zoom: 16.5, pitch: 65, duration: 2500 });
-            },
-            () => {},
-            { enableHighAccuracy: true }
-          );
-        }
-      }
-    } catch (e) {
-      log("Сбой: " + e.message);
     }
+    main();
   </script>
 </body>
 </html>
